@@ -173,6 +173,7 @@ struct Options {
   bool save_thumbnails = false;
   bool save_thumbnails_decoded = false;
   bool save_thumbnails_raw = false;
+  bool thumbnails = false;  //FOR_AEV
   RendererType use_renderer_type = RendererType::kDefault;
 #ifdef PDF_ENABLE_V8
   bool disable_javascript = false;
@@ -193,6 +194,7 @@ struct Options {
   OutputFormat output_format = OutputFormat::kNone;
   std::string password;
   std::string scale_factor_as_string;
+  std::string uniqueId;  //FOR_AEV
   std::string exe_path;
   std::string bin_directory;
   std::string font_directory;
@@ -516,6 +518,10 @@ bool ParseCommandLine(const std::vector<std::string>& args,
       options->save_thumbnails = true;
     } else if (cur_arg == "--save-thumbs-dec") {
       options->save_thumbnails_decoded = true;
+    } else if (cur_arg == "--thumbnails") {        //FOR_AEV
+      options->thumbnails = true;                  //FOR_AEV
+    } else if (ParseSwitchKeyValue(cur_arg, "--uniqueId=", &value)) {  //FOR_AEV
+      options->uniqueId = value;                                       //FOR_EAV
     } else if (cur_arg == "--save-thumbs-raw") {
       options->save_thumbnails_raw = true;
     } else if (ParseSwitchKeyValue(cur_arg, "--use-renderer=", &value)) {
@@ -963,6 +969,45 @@ class BitmapPageRenderer : public PageRenderer {
     };
   }
 
+// FOR_AEV begin
+// Overload for png uniqueid & thumbnails
+
+  // Wraps a `PageWriter` around a function pointer that writes the rasterized
+  // bitmap to an image file.
+  static PageWriter WrapPageWriter(
+      std::string (*bitmap_writer)(const char* pdf_name,
+                                   int num,
+                                   void* buffer,
+                                   int stride,
+                                   int width,
+                                   int height
+                                   , bool thumbnails
+                                   , std::string uniqueId)) {
+    return [bitmap_writer](BitmapPageRenderer& renderer,
+                           const std::string& name, int page_index, bool md5) {
+      int stride = FPDFBitmap_GetStride(renderer.bitmap());
+      void* buffer = FPDFBitmap_GetBuffer(renderer.bitmap());
+      std::string image_file_name = bitmap_writer(
+          name.c_str(), page_index, buffer, /*stride=*/stride,
+          /*width=*/renderer.width(), /*height=*/renderer.height()
+          , renderer.thumbnails()
+          , renderer.uniqueId()
+          );
+      if (image_file_name.empty()) {
+        return false;
+      }
+
+      if (md5) {
+        // Write the filename and the MD5 of the buffer to stdout.
+        OutputMD5Hash(image_file_name.c_str(),
+                      {static_cast<const uint8_t*>(buffer),
+                       static_cast<size_t>(stride) * renderer.height()});
+      }
+      return true;
+    };
+  }
+// FOR_AEV end
+
   bool HasOutput() const override { return !!bitmap_; }
 
   void Finish(FPDF_FORMHANDLE form) override {
@@ -982,10 +1027,16 @@ class BitmapPageRenderer : public PageRenderer {
                      int height,
                      int flags,
                      const std::function<void()>& idler,
-                     PageWriter writer)
-      : PageRenderer(page, /*width=*/width, /*height=*/height, /*flags=*/flags),
+                     PageWriter writer
+                     , bool thumbnails        // FOR_AEV
+                     , std::string uniqueId   // FOR_AEV
+                     )
+      : PageRenderer(page, /*width=*/width, /*height=*/height, /*flags=*/flags
+            , thumbnails, uniqueId  //  FOR_AEV
+      ),
         idler_(idler),
-        writer_(std::move(writer)) {}
+        writer_(std::move(writer)
+        ) {}
 
   bool InitializeBitmap(void* first_scan) {
     bool alpha = FPDFPage_HasTransparency(page());
@@ -1022,13 +1073,18 @@ class OneShotBitmapPageRenderer : public BitmapPageRenderer {
                             int height,
                             int flags,
                             const std::function<void()>& idler,
-                            PageWriter writer)
+                            PageWriter writer
+                            , bool thumbnails        // FOR_AEV
+                            , std::string uniqueId   // FOR_AEV
+                            )
       : BitmapPageRenderer(page,
                            /*width=*/width,
                            /*height=*/height,
                            /*flags=*/flags,
                            idler,
-                           std::move(writer)) {}
+                           std::move(writer)
+                           , thumbnails, uniqueId  // FOR_AEV
+                           ) {}
 
   bool Start() override {
     if (!InitializeBitmap(/*first_scan=*/nullptr)) {
@@ -1054,13 +1110,18 @@ class ProgressiveBitmapPageRenderer : public BitmapPageRenderer {
                                 int flags,
                                 const std::function<void()>& idler,
                                 PageWriter writer,
-                                const FPDF_COLORSCHEME* color_scheme)
+                                const FPDF_COLORSCHEME* color_scheme
+                            , bool thumbnails        // FOR_AEV
+                            , std::string uniqueId   // FOR_AEV
+                                )
       : BitmapPageRenderer(page,
                            /*width=*/width,
                            /*height=*/height,
                            /*flags=*/flags,
                            idler,
-                           std::move(writer)),
+                           std::move(writer)
+                           , thumbnails, uniqueId  // FOR_AEV
+                           ),
         color_scheme_(color_scheme) {
     pause_.version = 1;
     pause_.NeedToPauseNow = &NeedToPauseNow;
@@ -1098,6 +1159,7 @@ class ProgressiveBitmapPageRenderer : public BitmapPageRenderer {
   const FPDF_COLORSCHEME* color_scheme_;
   IFSDK_PAUSE pause_;
   bool to_be_continued_ = false;
+
 };
 
 #ifdef _WIN32
@@ -1490,7 +1552,9 @@ bool PdfProcessor::ProcessPage(const int page_index) {
     if (options().render_oneshot) {
       renderer = std::make_unique<OneShotBitmapPageRenderer>(
           page, /*width=*/width, /*height=*/height, /*flags=*/flags, idler(),
-          std::move(writer));
+          std::move(writer)
+          , options().thumbnails, options().uniqueId    // FOR_AEV
+          );
     } else {
       // Client programs will be setting these values when rendering.
       // This is a sample color scheme with distinct colors.
@@ -1503,7 +1567,9 @@ bool PdfProcessor::ProcessPage(const int page_index) {
 
       renderer = std::make_unique<ProgressiveBitmapPageRenderer>(
           page, /*width=*/width, /*height=*/height, /*flags=*/flags, idler(),
-          std::move(writer), options().forced_color ? &color_scheme : nullptr);
+          std::move(writer), options().forced_color ? &color_scheme : nullptr,
+          options().thumbnails, options().uniqueId    // FOR_AEV
+          );
     }
   }
 
@@ -1589,6 +1655,8 @@ void Processor::ProcessPdf(const std::string& name,
 
   if (!FPDF_DocumentHasValidCrossReferenceTable(doc.get()))
     fprintf(stderr, "Document has invalid cross reference table\n");
+
+  (void)FPDF_GetDocPermissions(doc.get());
 
   if (options().show_metadata) {
     DumpMetaData(doc.get());
@@ -1804,8 +1872,10 @@ constexpr char kUsageString[] =
     "  --ps3-type42 - write page raw PostScript (Lvl 3 with Type 42 fonts) "
     "<pdf-name>.<page-number>.ps\n"
 #endif
+    "  --thumbnails - will appened a .thumbnails to a generated png file name\n"  //FOR_AEV 
+    "  --uniqueId - a unique string to attached to generated pages. Currently only implemented for png transformation\n"  //FOR_AEV
     "  --txt   - write page text in UTF32-LE <pdf-name>.<page-number>.txt\n"
-    "  --png   - write page images <pdf-name>.<page-number>.png\n"
+    "  --png   - write page images <pdf-name>.<page-number>.<uniqueId>.png. Note: png must be run with the --uniqueId flag\n"
     "  --ppm   - write page images <pdf-name>.<page-number>.ppm\n"
     "  --annot - write annotation info <pdf-name>.<page-number>.annot.txt\n"
 #ifdef PDF_ENABLE_SKIA

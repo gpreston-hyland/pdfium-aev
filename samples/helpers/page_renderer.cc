@@ -6,8 +6,12 @@
 
 #include "public/fpdfview.h"
 
-PageRenderer::PageRenderer(FPDF_PAGE page, int width, int height, int flags)
-    : page_(page), width_(width), height_(height), flags_(flags) {}
+PageRenderer::PageRenderer(FPDF_PAGE page, int width, int height, int flags
+  , bool thumbnails, std::string uniqueId  // FOR_AEV
+  )
+    : page_(page), width_(width), height_(height), flags_(flags) 
+    , thumbnails_(thumbnails), uniqueId_(uniqueId)   // FOR_AEV
+    {}
 
 PageRenderer::~PageRenderer() = default;
 

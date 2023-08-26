@@ -30,18 +30,22 @@ class PageRenderer {
   virtual bool Write(const std::string& name, int page_index, bool md5) = 0;
 
  protected:
-  PageRenderer(FPDF_PAGE page, int width, int height, int flags);
+  PageRenderer(FPDF_PAGE page, int width, int height, int flags, bool thumbnails, std::string uniqueId);
 
   FPDF_PAGE page() { return page_; }
   int width() const { return width_; }
   int height() const { return height_; }
   int flags() const { return flags_; }
+  bool thumbnails() const { return thumbnails_; }
+  std::string uniqueId()  { return uniqueId_; }
 
  private:
   FPDF_PAGE page_;
   int width_;
   int height_;
   int flags_;
+  bool thumbnails_;
+  std::string uniqueId_;
 };
 
 #endif  // SAMPLES_HELPERS_PAGE_RENDERER_H_

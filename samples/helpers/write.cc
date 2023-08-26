@@ -252,6 +252,33 @@ std::string GenerateImageOutputFilename(const char* pdf_name,
   return filename;
 }
 
+// FOR_AEV begin
+std::string GeneratePageOutputFilename(const char* pdf_name,
+                                        int page_num,
+                                        const char* extension
+                                        , bool thumbnails
+                                        , std::string uniqueId) {
+  std::ostringstream stream;
+
+  if (thumbnails) {
+    stream << pdf_name << "." << page_num << "." << uniqueId << ".thumbnail." << extension;
+
+  } else {
+    stream << pdf_name << "." << page_num << "." << uniqueId << "." << extension;
+
+  }
+  //stream << pdf_name << "." << page_num << "." << extension;
+  std::string filename = stream.str();
+  if (filename.size() >= 256) {
+    fprintf(stderr, "Filename %s for saving image is too long.\n",
+            filename.c_str());
+    return std::string();
+  }
+
+  return filename;
+}
+// FOR_AEV end
+
 }  // namespace
 
 std::string WritePpm(const char* pdf_name,
@@ -451,7 +478,9 @@ std::string WritePng(const char* pdf_name,
                      void* buffer,
                      int stride,
                      int width,
-                     int height) {
+                     int height,
+                     bool thumbnails,
+                     std::string uniqueId) {
   if (!CheckDimensions(stride, width, height)) {
     return "";
   }
@@ -465,7 +494,8 @@ std::string WritePng(const char* pdf_name,
     return "";
   }
 
-  std::string filename = GeneratePageOutputFilename(pdf_name, num, "png");
+// FOR_AEV  std::string filename = GeneratePageOutputFilename(pdf_name, num, "png");
+  std::string filename = GeneratePageOutputFilename(pdf_name, num, "png", thumbnails, uniqueId);
   if (filename.empty()) {
     return std::string();
   }

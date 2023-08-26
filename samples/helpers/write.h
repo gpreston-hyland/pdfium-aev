@@ -28,7 +28,9 @@ std::string WritePng(const char* pdf_name,
                      void* buffer,
                      int stride,
                      int width,
-                     int height);
+                     int height,
+                     bool thumbnail,  // FOR_AEV
+                     std::string uniqueId);  // FOR_AEV
 
 #ifdef _WIN32
 std::string WriteBmp(const char* pdf_name,
