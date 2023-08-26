@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,14 @@
 
 #include "xfa/fxfa/parser/cxfa_signdata.h"
 
-#include <memory>
-
 #include "fxjs/xfa/cjx_node.h"
+#include "xfa/fxfa/parser/cxfa_document.h"
 
 namespace {
 
 const CXFA_Node::PropertyData kSignDataPropertyData[] = {
-    {XFA_Element::Filter, 1, 0},
-    {XFA_Element::Manifest, 1, 0},
+    {XFA_Element::Filter, 1, {}},
+    {XFA_Element::Manifest, 1, {}},
 };
 
 const CXFA_Node::AttributeData kSignDataAttributeData[] = {
@@ -32,11 +31,13 @@ const CXFA_Node::AttributeData kSignDataAttributeData[] = {
 CXFA_SignData::CXFA_SignData(CXFA_Document* doc, XFA_PacketType packet)
     : CXFA_Node(doc,
                 packet,
-                (XFA_XDPPACKET_Template | XFA_XDPPACKET_Form),
+                {XFA_XDPPACKET::kTemplate, XFA_XDPPACKET::kForm},
                 XFA_ObjectType::Node,
                 XFA_Element::SignData,
                 kSignDataPropertyData,
                 kSignDataAttributeData,
-                std::make_unique<CJX_Node>(this)) {}
+                cppgc::MakeGarbageCollected<CJX_Node>(
+                    doc->GetHeap()->GetAllocationHandle(),
+                    this)) {}
 
 CXFA_SignData::~CXFA_SignData() = default;

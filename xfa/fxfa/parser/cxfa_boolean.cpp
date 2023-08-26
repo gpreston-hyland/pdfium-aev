@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 
 #include "xfa/fxfa/parser/cxfa_boolean.h"
 
-#include <memory>
-
 #include "fxjs/xfa/cjx_boolean.h"
+#include "xfa/fxfa/parser/cxfa_document.h"
 
 namespace {
 
@@ -24,12 +23,14 @@ const CXFA_Node::AttributeData kBooleanAttributeData[] = {
 CXFA_Boolean::CXFA_Boolean(CXFA_Document* doc, XFA_PacketType packet)
     : CXFA_Node(doc,
                 packet,
-                (XFA_XDPPACKET_SourceSet | XFA_XDPPACKET_Template |
-                 XFA_XDPPACKET_Form),
+                {XFA_XDPPACKET::kSourceSet, XFA_XDPPACKET::kTemplate,
+                 XFA_XDPPACKET::kForm},
                 XFA_ObjectType::ContentNode,
                 XFA_Element::Boolean,
                 {},
                 kBooleanAttributeData,
-                std::make_unique<CJX_Boolean>(this)) {}
+                cppgc::MakeGarbageCollected<CJX_Boolean>(
+                    doc->GetHeap()->GetAllocationHandle(),
+                    this)) {}
 
 CXFA_Boolean::~CXFA_Boolean() = default;

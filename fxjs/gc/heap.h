@@ -1,4 +1,4 @@
-// Copyright 2020 PDFium Authors. All rights reserved.
+// Copyright 2020 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,15 @@
 #include <memory>
 
 #include "v8/include/cppgc/allocation.h"
-#include "v8/include/cppgc/heap.h"
-#include "v8/include/libplatform/libplatform.h"
+
+namespace cppgc {
+class Heap;
+}  // namespace cppgc
+
+namespace v8 {
+class Isolate;
+class Platform;
+}  // namespace v8
 
 struct FXGCHeapDeleter {
   void operator()(cppgc::Heap* heap);
@@ -17,7 +24,7 @@ struct FXGCHeapDeleter {
 
 using FXGCScopedHeap = std::unique_ptr<cppgc::Heap, FXGCHeapDeleter>;
 
-void FXGC_Initialize(v8::Platform* platform);
+void FXGC_Initialize(v8::Platform* platform, v8::Isolate* isolate);
 void FXGC_Release();
 FXGCScopedHeap FXGC_CreateHeap();
 void FXGC_ForceGarbageCollection(cppgc::Heap* heap);

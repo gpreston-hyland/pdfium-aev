@@ -1,19 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "testing/fuzzers/pdfium_fuzzer_helper.h"
 
 #include <assert.h>
-#include <limits.h>
-
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -23,7 +20,9 @@
 #include "public/fpdf_dataavail.h"
 #include "public/fpdf_ext.h"
 #include "public/fpdf_text.h"
-#include "third_party/base/span.h"
+#include "third_party/base/check_op.h"
+#include "third_party/base/containers/span.h"
+#include "third_party/base/numerics/checked_math.h"
 
 namespace {
 
@@ -36,10 +35,9 @@ class FuzzerTestLoader {
                       unsigned char* pBuf,
                       unsigned long size) {
     FuzzerTestLoader* pLoader = static_cast<FuzzerTestLoader*>(param);
-    if (pos + size < pos || pos + size > pLoader->m_Span.size()) {
-      NOTREACHED();
-      return 0;
-    }
+    pdfium::base::CheckedNumeric<size_t> end = pos;
+    end += size;
+    CHECK_LE(end.ValueOrDie(), pLoader->m_Span.size());
 
     memcpy(pBuf, &pLoader->m_Span[pos], size);
     return 1;
@@ -95,7 +93,7 @@ void Add_Segment(FX_DOWNLOADHINTS* pThis, size_t offset, size_t size) {}
 std::pair<int, int> GetRenderingAndFormFlagFromData(const char* data,
                                                     size_t len) {
   std::string data_str = std::string(data, len);
-  std::size_t data_hash = std::hash<std::string>()(data_str);
+  size_t data_hash = std::hash<std::string>()(data_str);
 
   // The largest flag value is 0x4FFF, so just take 16 bits from |data_hash| at
   // a time.
@@ -177,8 +175,6 @@ void PDFiumFuzzerHelper::RenderPdf(const char* data, size_t len) {
   if (!doc)
     return;
 
-  (void)FPDF_GetDocPermissions(doc.get());
-
   ScopedFPDFFormHandle form(
       FPDFDOC_InitFormFillEnvironment(doc.get(), &form_callbacks));
   if (!OnFormFillEnvLoaded(doc.get()))
@@ -217,6 +213,8 @@ bool PDFiumFuzzerHelper::RenderPage(FPDF_DOCUMENT doc,
   ScopedFPDFTextPage text_page(FPDFText_LoadPage(page.get()));
   FORM_OnAfterLoadPage(page.get(), form);
   FORM_DoPageAAction(page.get(), form, FPDFPAGE_AACTION_OPEN);
+
+  FormActionHandler(form, doc, page.get());
 
   const double scale = 1.0;
   int width = static_cast<int>(FPDF_GetPageWidthF(page.get()) * scale);

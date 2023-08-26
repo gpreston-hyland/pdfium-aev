@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include "xfa/fxfa/parser/cxfa_nodeowner.h"
 
-#include <utility>
-
+#include "fxjs/gc/container_trace.h"
+#include "third_party/base/check.h"
 #include "xfa/fxfa/parser/cxfa_list.h"
 #include "xfa/fxfa/parser/cxfa_node.h"
 
@@ -15,18 +15,11 @@ CXFA_NodeOwner::CXFA_NodeOwner() = default;
 
 CXFA_NodeOwner::~CXFA_NodeOwner() = default;
 
-CXFA_Node* CXFA_NodeOwner::AddOwnedNode(std::unique_ptr<CXFA_Node> node) {
-  if (!node)
-    return nullptr;
-
-  CXFA_Node* ret = node.get();
-  nodes_.push_back(std::move(node));
-  return ret;
+void CXFA_NodeOwner::Trace(cppgc::Visitor* visitor) const {
+  ContainerTrace(visitor, lists_);
 }
 
-CXFA_List* CXFA_NodeOwner::AddOwnedList(std::unique_ptr<CXFA_List> list) {
-  ASSERT(list);
-  CXFA_List* ret = list.get();
-  lists_.push_back(std::move(list));
-  return ret;
+void CXFA_NodeOwner::PersistList(CXFA_List* list) {
+  DCHECK(list);
+  lists_.emplace_back(list);
 }

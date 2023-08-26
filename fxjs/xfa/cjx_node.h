@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@ class CXFA_Node;
 
 class CJX_Node : public CJX_Tree {
  public:
-  explicit CJX_Node(CXFA_Node* node);
+  CONSTRUCT_VIA_MAKE_GARBAGE_COLLECTED;
   ~CJX_Node() override;
 
   // CJX_Object:
@@ -41,6 +41,8 @@ class CJX_Node : public CJX_Tree {
   JSE_PROP(oneOfChild);
 
  protected:
+  explicit CJX_Node(CXFA_Node* node);
+
   XFA_EventError execSingleEventByName(WideStringView wsEventName,
                                        XFA_Element eType);
 

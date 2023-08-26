@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,11 @@
 #ifndef FXJS_XFA_CFXJSE_NODEHELPER_H_
 #define FXJS_XFA_CFXJSE_NODEHELPER_H_
 
-#include "core/fxcrt/fx_string.h"
+#include "core/fxcrt/widestring.h"
+#include "fxjs/xfa/cfxjse_engine.h"
+#include "v8/include/cppgc/persistent.h"
 #include "xfa/fxfa/fxfa_basic.h"
-#include "xfa/fxfa/parser/xfa_resolvenode_rs.h"
 
-class CFXJSE_Engine;
 class CXFA_Node;
 
 class CFXJSE_NodeHelper {
@@ -27,11 +27,12 @@ class CFXJSE_NodeHelper {
   void SetCreateNodeType(CXFA_Node* refNode);
 
   XFA_Element m_eLastCreateType = XFA_Element::DataValue;
-  XFA_ResolveNode_RSType m_iCreateFlag = XFA_ResolveNode_RSType_CreateNodeOne;
+  CFXJSE_Engine::ResolveResult::Type m_iCreateFlag =
+      CFXJSE_Engine::ResolveResult::Type::kCreateNodeOne;
   size_t m_iCreateCount = 0;
   int32_t m_iCurAllStart = -1;
-  UnownedPtr<CXFA_Node> m_pCreateParent;
-  UnownedPtr<CXFA_Node> m_pAllStartParent;
+  cppgc::Persistent<CXFA_Node> m_pCreateParent;
+  cppgc::Persistent<CXFA_Node> m_pAllStartParent;
 };
 
 #endif  // FXJS_XFA_CFXJSE_NODEHELPER_H_

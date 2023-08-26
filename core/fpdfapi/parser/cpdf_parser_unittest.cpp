@@ -1,4 +1,4 @@
-// Copyright 2015 PDFium Authors. All rights reserved.
+// Copyright 2015 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,35 +6,100 @@
 
 #include <limits>
 #include <memory>
+#include <ostream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_linearized_header.h"
 #include "core/fpdfapi/parser/cpdf_object.h"
 #include "core/fpdfapi/parser/cpdf_syntax_parser.h"
-#include "core/fxcrt/cfx_readonlymemorystream.h"
+#include "core/fxcrt/cfx_read_only_span_stream.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_stream.h"
 #include "core/fxcrt/retain_ptr.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/utils/path_service.h"
-#include "third_party/base/stl_util.h"
+
+using testing::ElementsAre;
+using testing::Pair;
+using testing::Return;
 
 namespace {
 
-CPDF_CrossRefTable::ObjectInfo GetObjInfo(const CPDF_Parser& parser,
-                                          uint32_t obj_num) {
+CPDF_Parser::ObjectInfo GetObjInfo(const CPDF_Parser& parser,
+                                   uint32_t obj_num) {
   const auto* info = parser.GetCrossRefTable()->GetObjectInfo(obj_num);
-  return info ? *info : CPDF_CrossRefTable::ObjectInfo();
+  return info ? *info : CPDF_Parser::ObjectInfo();
 }
 
+class TestObjectsHolder final : public CPDF_Parser::ParsedObjectsHolder {
+ public:
+  TestObjectsHolder() = default;
+  ~TestObjectsHolder() override = default;
+
+  // CPDF_Parser::ParsedObjectsHolder:
+  bool TryInit() override { return true; }
+  MOCK_METHOD1(ParseIndirectObject, RetainPtr<CPDF_Object>(uint32_t objnum));
+};
+
 }  // namespace
+
+// Test-only helper to support Gmock. Cannot be in an anonymous namespace.
+bool operator==(const CPDF_Parser::ObjectInfo& lhs,
+                const CPDF_Parser::ObjectInfo& rhs) {
+  if (lhs.type != rhs.type) {
+    return false;
+  }
+
+  if (lhs.gennum != rhs.gennum) {
+    return false;
+  }
+
+  switch (lhs.type) {
+    case CPDF_Parser::ObjectType::kFree:
+      return true;
+    case CPDF_Parser::ObjectType::kNormal:
+      return lhs.pos == rhs.pos;
+    case CPDF_Parser::ObjectType::kCompressed:
+      return lhs.archive.obj_num == rhs.archive.obj_num &&
+             lhs.archive.obj_index == rhs.archive.obj_index;
+    case CPDF_Parser::ObjectType::kObjStream:
+      return false;
+  }
+}
+
+// Test-only helper to let Gmock pretty-print `info`. Cannot be in an anonymous
+// namespace.
+std::ostream& operator<<(std::ostream& os,
+                         const CPDF_Parser::ObjectInfo& info) {
+  os << "(";
+  switch (info.type) {
+    case CPDF_Parser::ObjectType::kFree:
+      os << "Free object";
+      break;
+    case CPDF_Parser::ObjectType::kNormal:
+      os << "Normal object, pos: " << info.pos;
+      break;
+    case CPDF_Parser::ObjectType::kCompressed:
+      os << "Compressed object, archive obj_num: " << info.archive.obj_num
+         << ", archive obj_index: " << info.archive.obj_index;
+      break;
+    case CPDF_Parser::ObjectType::kObjStream:
+      os << "ObjectStream object";
+      break;
+  }
+  os << ", gennum: " << info.gennum << ")";
+  return os;
+}
 
 // A wrapper class to help test member functions of CPDF_Parser.
 class CPDF_TestParser final : public CPDF_Parser {
  public:
-  CPDF_TestParser() {}
-  ~CPDF_TestParser() {}
+  CPDF_TestParser() : CPDF_Parser(&object_holder_) {}
+  ~CPDF_TestParser() = default;
 
   // Setup reading from a file and initial states.
   bool InitTestFromFile(const char* path) {
@@ -44,15 +109,16 @@ class CPDF_TestParser final : public CPDF_Parser {
       return false;
 
     // For the test file, the header is set at the beginning.
-    m_pSyntax = std::make_unique<CPDF_SyntaxParser>(pFileAccess);
+    SetSyntaxParserForTesting(
+        std::make_unique<CPDF_SyntaxParser>(std::move(pFileAccess)));
     return true;
   }
 
   // Setup reading from a buffer and initial states.
   bool InitTestFromBufferWithOffset(pdfium::span<const uint8_t> buffer,
                                     FX_FILESIZE header_offset) {
-    m_pSyntax = CPDF_SyntaxParser::CreateForTesting(
-        pdfium::MakeRetain<CFX_ReadOnlyMemoryStream>(buffer), header_offset);
+    SetSyntaxParserForTesting(CPDF_SyntaxParser::CreateForTesting(
+        pdfium::MakeRetain<CFX_ReadOnlySpanStream>(buffer), header_offset));
     return true;
   }
 
@@ -60,17 +126,20 @@ class CPDF_TestParser final : public CPDF_Parser {
     return InitTestFromBufferWithOffset(buffer, 0 /*header_offset*/);
   }
 
+  // Expose protected CPDF_Parser methods for testing.
+  using CPDF_Parser::LoadCrossRefV4;
+  using CPDF_Parser::ParseLinearizedHeader;
+  using CPDF_Parser::ParseStartXRef;
+  using CPDF_Parser::RebuildCrossRef;
+  using CPDF_Parser::StartParseInternal;
+
+  TestObjectsHolder& object_holder() { return object_holder_; }
+
  private:
-  // Add test cases here as private friend so that protected members in
-  // CPDF_Parser can be accessed by test cases.
-  // Need to access RebuildCrossRef.
-  FRIEND_TEST(cpdf_parser, RebuildCrossRefCorrectly);
-  FRIEND_TEST(cpdf_parser, RebuildCrossRefFailed);
-  // Need to access LoadCrossRefV4.
-  FRIEND_TEST(cpdf_parser, LoadCrossRefV4);
+  TestObjectsHolder object_holder_;
 };
 
-TEST(cpdf_parser, RebuildCrossRefCorrectly) {
+TEST(ParserTest, RebuildCrossRefCorrectly) {
   CPDF_TestParser parser;
   std::string test_file;
   ASSERT_TRUE(PathService::GetTestFilePath("parser_rebuildxref_correct.pdf",
@@ -80,13 +149,17 @@ TEST(cpdf_parser, RebuildCrossRefCorrectly) {
   ASSERT_TRUE(parser.RebuildCrossRef());
   const FX_FILESIZE offsets[] = {0, 15, 61, 154, 296, 374, 450};
   const uint16_t versions[] = {0, 0, 2, 4, 6, 8, 0};
-  for (size_t i = 0; i < pdfium::size(offsets); ++i)
+  for (size_t i = 0; i < std::size(offsets); ++i)
     EXPECT_EQ(offsets[i], GetObjInfo(parser, i).pos);
-  for (size_t i = 0; i < pdfium::size(versions); ++i)
+  for (size_t i = 0; i < std::size(versions); ++i)
     EXPECT_EQ(versions[i], GetObjInfo(parser, i).gennum);
+
+  const CPDF_CrossRefTable* cross_ref_table = parser.GetCrossRefTable();
+  ASSERT_TRUE(cross_ref_table);
+  EXPECT_EQ(0u, cross_ref_table->trailer_object_number());
 }
 
-TEST(cpdf_parser, RebuildCrossRefFailed) {
+TEST(ParserTest, RebuildCrossRefFailed) {
   CPDF_TestParser parser;
   std::string test_file;
   ASSERT_TRUE(PathService::GetTestFilePath(
@@ -96,7 +169,7 @@ TEST(cpdf_parser, RebuildCrossRefFailed) {
   ASSERT_FALSE(parser.RebuildCrossRef());
 }
 
-TEST(cpdf_parser, LoadCrossRefV4) {
+TEST(ParserTest, LoadCrossRefV4) {
   {
     static const unsigned char kXrefTable[] =
         "xref \n"
@@ -120,9 +193,9 @@ TEST(cpdf_parser, LoadCrossRefV4) {
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kNotCompressed,
         CPDF_TestParser::ObjectType::kNotCompressed};
-    static_assert(pdfium::size(kOffsets) == pdfium::size(kTypes),
+    static_assert(std::size(kOffsets) == std::size(kTypes),
                   "kOffsets / kTypes size mismatch");
-    for (size_t i = 0; i < pdfium::size(kOffsets); ++i) {
+    for (size_t i = 0; i < std::size(kOffsets); ++i) {
       EXPECT_EQ(kOffsets[i], GetObjInfo(parser, i).pos);
       EXPECT_EQ(kTypes[i], GetObjInfo(parser, i).type);
     }
@@ -160,9 +233,9 @@ TEST(cpdf_parser, LoadCrossRefV4) {
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kNotCompressed};
-    static_assert(pdfium::size(kOffsets) == pdfium::size(kTypes),
+    static_assert(std::size(kOffsets) == std::size(kTypes),
                   "kOffsets / kTypes size mismatch");
-    for (size_t i = 0; i < pdfium::size(kOffsets); ++i) {
+    for (size_t i = 0; i < std::size(kOffsets); ++i) {
       EXPECT_EQ(kOffsets[i], GetObjInfo(parser, i).pos);
       EXPECT_EQ(kTypes[i], GetObjInfo(parser, i).type);
     }
@@ -200,9 +273,9 @@ TEST(cpdf_parser, LoadCrossRefV4) {
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kNotCompressed};
-    static_assert(pdfium::size(kOffsets) == pdfium::size(kTypes),
+    static_assert(std::size(kOffsets) == std::size(kTypes),
                   "kOffsets / kTypes size mismatch");
-    for (size_t i = 0; i < pdfium::size(kOffsets); ++i) {
+    for (size_t i = 0; i < std::size(kOffsets); ++i) {
       EXPECT_EQ(kOffsets[i], GetObjInfo(parser, i).pos);
       EXPECT_EQ(kTypes[i], GetObjInfo(parser, i).type);
     }
@@ -232,9 +305,9 @@ TEST(cpdf_parser, LoadCrossRefV4) {
         CPDF_TestParser::ObjectType::kFree,
         CPDF_TestParser::ObjectType::kNotCompressed,
         CPDF_TestParser::ObjectType::kNotCompressed};
-    static_assert(pdfium::size(kOffsets) == pdfium::size(kTypes),
+    static_assert(std::size(kOffsets) == std::size(kTypes),
                   "kOffsets / kTypes size mismatch");
-    for (size_t i = 0; i < pdfium::size(kOffsets); ++i) {
+    for (size_t i = 0; i < std::size(kOffsets); ++i) {
       EXPECT_EQ(kOffsets[i], GetObjInfo(parser, i).pos);
       EXPECT_EQ(kTypes[i], GetObjInfo(parser, i).type);
     }
@@ -265,7 +338,7 @@ TEST(cpdf_parser, LoadCrossRefV4) {
   }
 }
 
-TEST(cpdf_parser, ParseStartXRef) {
+TEST(ParserTest, ParseStartXRef) {
   CPDF_TestParser parser;
   std::string test_file;
   ASSERT_TRUE(
@@ -279,7 +352,7 @@ TEST(cpdf_parser, ParseStartXRef) {
   EXPECT_EQ(75u, cross_ref_v5_obj->GetObjNum());
 }
 
-TEST(cpdf_parser, ParseStartXRefWithHeaderOffset) {
+TEST(ParserTest, ParseStartXRefWithHeaderOffset) {
   static constexpr FX_FILESIZE kTestHeaderOffset = 765;
   std::string test_file;
   ASSERT_TRUE(
@@ -289,8 +362,8 @@ TEST(cpdf_parser, ParseStartXRefWithHeaderOffset) {
   ASSERT_TRUE(pFileAccess);
 
   std::vector<unsigned char> data(pFileAccess->GetSize() + kTestHeaderOffset);
-  ASSERT_TRUE(pFileAccess->ReadBlockAtOffset(&data.front() + kTestHeaderOffset,
-                                             0, pFileAccess->GetSize()));
+  ASSERT_TRUE(pFileAccess->ReadBlockAtOffset(
+      pdfium::make_span(data).subspan(kTestHeaderOffset), 0));
   CPDF_TestParser parser;
   parser.InitTestFromBufferWithOffset(data, kTestHeaderOffset);
 
@@ -301,7 +374,7 @@ TEST(cpdf_parser, ParseStartXRefWithHeaderOffset) {
   EXPECT_EQ(75u, cross_ref_v5_obj->GetObjNum());
 }
 
-TEST(cpdf_parser, ParseLinearizedWithHeaderOffset) {
+TEST(ParserTest, ParseLinearizedWithHeaderOffset) {
   static constexpr FX_FILESIZE kTestHeaderOffset = 765;
   std::string test_file;
   ASSERT_TRUE(PathService::GetTestFilePath("linearized.pdf", &test_file));
@@ -310,15 +383,19 @@ TEST(cpdf_parser, ParseLinearizedWithHeaderOffset) {
   ASSERT_TRUE(pFileAccess);
 
   std::vector<unsigned char> data(pFileAccess->GetSize() + kTestHeaderOffset);
-  ASSERT_TRUE(pFileAccess->ReadBlockAtOffset(&data.front() + kTestHeaderOffset,
-                                             0, pFileAccess->GetSize()));
+  ASSERT_TRUE(pFileAccess->ReadBlockAtOffset(
+      pdfium::make_span(data).subspan(kTestHeaderOffset), 0));
+
   CPDF_TestParser parser;
   parser.InitTestFromBufferWithOffset(data, kTestHeaderOffset);
-
   EXPECT_TRUE(parser.ParseLinearizedHeader());
+
+  const CPDF_CrossRefTable* cross_ref_table = parser.GetCrossRefTable();
+  ASSERT_TRUE(cross_ref_table);
+  EXPECT_EQ(0u, cross_ref_table->trailer_object_number());
 }
 
-TEST(cpdf_parser, BadStartXrefShouldNotBuildCrossRefTable) {
+TEST(ParserTest, BadStartXrefShouldNotBuildCrossRefTable) {
   const unsigned char kData[] =
       "%PDF1-7 0 obj <</Size 2 /W [0 0 0]\n>>\n"
       "stream\n"
@@ -333,4 +410,413 @@ TEST(cpdf_parser, BadStartXrefShouldNotBuildCrossRefTable) {
   EXPECT_EQ(CPDF_Parser::FORMAT_ERROR, parser.StartParseInternal());
   ASSERT_TRUE(parser.GetCrossRefTable());
   EXPECT_EQ(0u, parser.GetCrossRefTable()->objects_info().size());
+}
+
+class ParserXRefTest : public testing::Test {
+ public:
+  ParserXRefTest() = default;
+  ~ParserXRefTest() override = default;
+
+  // testing::Test:
+  void SetUp() override {
+    // Satisfy CPDF_Parser's checks, so the test data below can concentrate on
+    // the /XRef stream and avoid also providing other valid dictionaries.
+    dummy_root_ = pdfium::MakeRetain<CPDF_Dictionary>();
+    EXPECT_CALL(parser().object_holder(), ParseIndirectObject)
+        .WillRepeatedly(Return(dummy_root_));
+  }
+
+  CPDF_TestParser& parser() { return parser_; }
+
+ private:
+  RetainPtr<CPDF_Dictionary> dummy_root_;
+  CPDF_TestParser parser_;
+};
+
+TEST_F(ParserXRefTest, XrefObjectIndicesTooBig) {
+  // Since /Index starts at 4194303, the object number will go past
+  // `kMaxObjectNumber`.
+  static_assert(CPDF_Parser::kMaxObjectNumber == 4194304,
+                "Unexpected kMaxObjectNumber");
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Index [4194303 3]\n"
+      "  /Root 1 0 R\n"
+      "  /Size 4194306\n"
+      "  /W [1 1 1]\n"
+      ">>\n"
+      "stream\n"
+      "01 00 00\n"
+      "01 0F 00\n"
+      "01 12 00\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::SUCCESS, parser().StartParseInternal());
+  EXPECT_FALSE(parser().xref_table_rebuilt());
+  ASSERT_TRUE(parser().GetCrossRefTable());
+  const auto& objects_info = parser().GetCrossRefTable()->objects_info();
+
+  // This should be the only object from table. Subsequent objects have object
+  // numbers that are too big.
+  CPDF_Parser::ObjectInfo only_valid_object;
+  only_valid_object.type = CPDF_Parser::ObjectType::kNormal;
+  only_valid_object.pos = 0;
+
+  // TODO(thestig): Should the xref table contain object 4194305?
+  // Consider reworking CPDF_Parser's object representation to avoid having to
+  // store this placeholder object.
+  CPDF_Parser::ObjectInfo placeholder_object;
+  placeholder_object.type = CPDF_Parser::ObjectType::kFree;
+  placeholder_object.pos = 0;
+
+  EXPECT_THAT(objects_info, ElementsAre(Pair(4194303, only_valid_object),
+                                        Pair(4194305, placeholder_object)));
+}
+
+TEST_F(ParserXRefTest, XrefHasInvalidArchiveObjectNumber) {
+  // 0xFF in the first object in the xref object stream is invalid.
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Root 1 0 R\n"
+      "  /Size 3\n"
+      "  /W [1 1 1]\n"
+      ">>\n"
+      "stream\n"
+      "02 FF 00\n"
+      "01 0F 00\n"
+      "01 12 00\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::SUCCESS, parser().StartParseInternal());
+  EXPECT_FALSE(parser().xref_table_rebuilt());
+
+  const CPDF_CrossRefTable* cross_ref_table = parser().GetCrossRefTable();
+  ASSERT_TRUE(cross_ref_table);
+  EXPECT_EQ(7u, cross_ref_table->trailer_object_number());
+  const auto& objects_info = cross_ref_table->objects_info();
+
+  // The expectation is for the parser to skip over the first object, and
+  // continue parsing the remaining objects. So these are the second and third
+  // objects.
+  CPDF_Parser::ObjectInfo expected_objects[2];
+  expected_objects[0].type = CPDF_Parser::ObjectType::kNormal;
+  expected_objects[0].pos = 15;
+  expected_objects[1].type = CPDF_Parser::ObjectType::kNormal;
+  expected_objects[1].pos = 18;
+
+  EXPECT_THAT(objects_info, ElementsAre(Pair(1, expected_objects[0]),
+                                        Pair(2, expected_objects[1])));
+}
+
+TEST_F(ParserXRefTest, XrefHasInvalidObjectType) {
+  // The XRef object is a dictionary and not a stream.
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Root 1 0 R\n"
+      "  /Size 3\n"
+      "  /W [1 1 1]\n"
+      ">>\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::FORMAT_ERROR, parser().StartParseInternal());
+}
+
+TEST_F(ParserXRefTest, XrefHasInvalidPrevValue) {
+  // The /Prev value is an absolute offset, so it should never be negative.
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Root 1 0 R\n"
+      "  /Size 3\n"
+      "  /W [1 1 1]\n"
+      "  /Prev -1\n"
+      ">>\n"
+      "stream\n"
+      "02 FF 00\n"
+      "01 0F 00\n"
+      "01 12 00\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::FORMAT_ERROR, parser().StartParseInternal());
+}
+
+TEST_F(ParserXRefTest, XrefHasInvalidSizeValue) {
+  // The /Size value should never be negative.
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Root 1 0 R\n"
+      "  /Size 3\n"
+      "  /W [1 1 1]\n"
+      "  /Size -1\n"
+      ">>\n"
+      "stream\n"
+      "02 FF 00\n"
+      "01 0F 00\n"
+      "01 12 00\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::FORMAT_ERROR, parser().StartParseInternal());
+}
+
+TEST_F(ParserXRefTest, XrefHasInvalidWidth) {
+  // The /W array needs to have at least 3 values.
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Root 1 0 R\n"
+      "  /Size 3\n"
+      "  /W [1 1]\n"
+      ">>\n"
+      "stream\n"
+      "02 FF 00\n"
+      "01 0F 00\n"
+      "01 12 00\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+
+  // StartParseInternal() succeeded not because XRef parsing succeeded, but
+  // because RebuildCrossRef() got lucky with the data stream. Therefore, don't
+  // bother checking the garbage output.
+  EXPECT_EQ(CPDF_Parser::SUCCESS, parser().StartParseInternal());
+  EXPECT_TRUE(parser().xref_table_rebuilt());
+}
+
+TEST_F(ParserXRefTest, XrefFirstWidthEntryIsZero) {
+  // When the first /W array entry is 0, it implies the objects are all of the
+  // normal type.
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Root 1 0 R\n"
+      "  /Size 2\n"
+      "  /W [0 1 1]\n"
+      ">>\n"
+      "stream\n"
+      "0F 00\n"
+      "12 00\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::SUCCESS, parser().StartParseInternal());
+  EXPECT_FALSE(parser().xref_table_rebuilt());
+  ASSERT_TRUE(parser().GetCrossRefTable());
+  const auto& objects_info = parser().GetCrossRefTable()->objects_info();
+
+  CPDF_Parser::ObjectInfo expected_result[2];
+  expected_result[0].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[0].pos = 15;
+  expected_result[1].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[1].pos = 18;
+  EXPECT_THAT(objects_info, ElementsAre(Pair(0, expected_result[0]),
+                                        Pair(1, expected_result[1])));
+}
+
+TEST_F(ParserXRefTest, XrefWithValidIndex) {
+  // The /Index specifies objects (2), (4, 5), (80, 81, 82).
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Root 1 0 R\n"
+      "  /Size 83\n"
+      "  /Index [2 1 4 2 80 3]\n"
+      "  /W [1 1 1]\n"
+      ">>\n"
+      "stream\n"
+      "01 00 00\n"
+      "01 0F 00\n"
+      "01 12 00\n"
+      "01 20 00\n"
+      "01 22 00\n"
+      "01 25 00\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::SUCCESS, parser().StartParseInternal());
+  EXPECT_FALSE(parser().xref_table_rebuilt());
+  ASSERT_TRUE(parser().GetCrossRefTable());
+  const auto& objects_info = parser().GetCrossRefTable()->objects_info();
+
+  CPDF_Parser::ObjectInfo expected_result[6];
+  expected_result[0].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[0].pos = 0;
+  expected_result[1].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[1].pos = 15;
+  expected_result[2].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[2].pos = 18;
+  expected_result[3].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[3].pos = 32;
+  expected_result[4].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[4].pos = 34;
+  expected_result[5].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[5].pos = 37;
+  EXPECT_THAT(
+      objects_info,
+      ElementsAre(Pair(2, expected_result[0]), Pair(4, expected_result[1]),
+                  Pair(5, expected_result[2]), Pair(80, expected_result[3]),
+                  Pair(81, expected_result[4]), Pair(82, expected_result[5])));
+}
+
+TEST_F(ParserXRefTest, XrefIndexWithRepeatedObject) {
+  // The /Index specifies objects (2, 3), (3). AKA the sub-sections overlap.
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Root 1 0 R\n"
+      "  /Size 4\n"
+      "  /Index [2 2 3 1]\n"
+      "  /W [1 1 1]\n"
+      ">>\n"
+      "stream\n"
+      "01 00 00\n"
+      "01 0F 00\n"
+      "01 12 00\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::SUCCESS, parser().StartParseInternal());
+  EXPECT_FALSE(parser().xref_table_rebuilt());
+  ASSERT_TRUE(parser().GetCrossRefTable());
+  const auto& objects_info = parser().GetCrossRefTable()->objects_info();
+
+  CPDF_Parser::ObjectInfo expected_result[2];
+  expected_result[0].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[0].pos = 0;
+  expected_result[1].type = CPDF_Parser::ObjectType::kNormal;
+  // Since the /Index does not follow the spec, this is one of the 2 possible
+  // values that a parser can come up with.
+  expected_result[1].pos = 15;
+  EXPECT_THAT(objects_info, ElementsAre(Pair(2, expected_result[0]),
+                                        Pair(3, expected_result[1])));
+}
+
+TEST_F(ParserXRefTest, XrefIndexWithOutOfOrderObjects) {
+  // The /Index specifies objects (3, 4), (2), which is not in ascending order.
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Root 1 0 R\n"
+      "  /Size 5\n"
+      "  /Index [3 2 2 1]\n"
+      "  /W [1 1 1]\n"
+      ">>\n"
+      "stream\n"
+      "01 00 00\n"
+      "01 0F 00\n"
+      "01 12 00\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::SUCCESS, parser().StartParseInternal());
+  EXPECT_FALSE(parser().xref_table_rebuilt());
+  ASSERT_TRUE(parser().GetCrossRefTable());
+  const auto& objects_info = parser().GetCrossRefTable()->objects_info();
+
+  // Although the /Index does not follow the spec, the parser tolerates it.
+  CPDF_Parser::ObjectInfo expected_result[3];
+  expected_result[0].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[0].pos = 18;
+  expected_result[1].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[1].pos = 0;
+  expected_result[2].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[2].pos = 15;
+  EXPECT_THAT(objects_info, ElementsAre(Pair(2, expected_result[0]),
+                                        Pair(3, expected_result[1]),
+                                        Pair(4, expected_result[2])));
+}
+
+TEST_F(ParserXRefTest, XrefWithIndexAndWrongSize) {
+  // The /Index specifies objects (2), (80, 81), so the /Size should be 82,
+  // but is actually 81.
+  const unsigned char kData[] =
+      "%PDF1-7\n%\xa0\xf2\xa4\xf4\n"
+      "7 0 obj <<\n"
+      "  /Filter /ASCIIHexDecode\n"
+      "  /Root 1 0 R\n"
+      "  /Size 81\n"
+      "  /Index [2 1 80 2]\n"
+      "  /W [1 1 1]\n"
+      ">>\n"
+      "stream\n"
+      "01 00 00\n"
+      "01 0F 00\n"
+      "01 12 00\n"
+      "endstream\n"
+      "endobj\n"
+      "startxref\n"
+      "14\n"
+      "%%EOF\n";
+
+  ASSERT_TRUE(parser().InitTestFromBuffer(kData));
+  EXPECT_EQ(CPDF_Parser::SUCCESS, parser().StartParseInternal());
+  EXPECT_FALSE(parser().xref_table_rebuilt());
+  ASSERT_TRUE(parser().GetCrossRefTable());
+  const auto& objects_info = parser().GetCrossRefTable()->objects_info();
+
+  CPDF_Parser::ObjectInfo expected_result[3];
+  expected_result[0].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[0].pos = 0;
+  expected_result[1].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[1].pos = 15;
+  expected_result[2].type = CPDF_Parser::ObjectType::kNormal;
+  expected_result[2].pos = 18;
+  EXPECT_THAT(objects_info, ElementsAre(Pair(2, expected_result[0]),
+                                        Pair(80, expected_result[1]),
+                                        Pair(81, expected_result[2])));
 }

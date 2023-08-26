@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,13 @@
 
 #include "xfa/fxfa/parser/cxfa_outputxsl.h"
 
-#include <memory>
-
 #include "fxjs/xfa/cjx_node.h"
+#include "xfa/fxfa/parser/cxfa_document.h"
 
 namespace {
 
 const CXFA_Node::PropertyData kOutputXSLPropertyData[] = {
-    {XFA_Element::Uri, 1, 0},
+    {XFA_Element::Uri, 1, {}},
 };
 
 const CXFA_Node::AttributeData kOutputXSLAttributeData[] = {
@@ -26,11 +25,13 @@ const CXFA_Node::AttributeData kOutputXSLAttributeData[] = {
 CXFA_OutputXSL::CXFA_OutputXSL(CXFA_Document* doc, XFA_PacketType packet)
     : CXFA_Node(doc,
                 packet,
-                XFA_XDPPACKET_Config,
+                XFA_XDPPACKET::kConfig,
                 XFA_ObjectType::Node,
                 XFA_Element::OutputXSL,
                 kOutputXSLPropertyData,
                 kOutputXSLAttributeData,
-                std::make_unique<CJX_Node>(this)) {}
+                cppgc::MakeGarbageCollected<CJX_Node>(
+                    doc->GetHeap()->GetAllocationHandle(),
+                    this)) {}
 
 CXFA_OutputXSL::~CXFA_OutputXSL() = default;

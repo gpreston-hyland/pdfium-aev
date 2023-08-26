@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "xfa/fwl/cfwl_picturebox.h"
 
-CFWL_PictureBox::CFWL_PictureBox(const CFWL_App* app)
+CFWL_PictureBox::CFWL_PictureBox(CFWL_App* app)
     : CFWL_Widget(app, CFWL_Widget::Properties(), nullptr) {}
 
 CFWL_PictureBox::~CFWL_PictureBox() = default;
@@ -22,16 +22,16 @@ void CFWL_PictureBox::Update() {
   m_ClientRect = GetClientRect();
 }
 
-void CFWL_PictureBox::DrawWidget(CXFA_Graphics* pGraphics,
+void CFWL_PictureBox::DrawWidget(CFGAS_GEGraphics* pGraphics,
                                  const CFX_Matrix& matrix) {
   if (!pGraphics)
     return;
 
   if (HasBorder())
-    DrawBorder(pGraphics, CFWL_Part::Border, matrix);
+    DrawBorder(pGraphics, CFWL_ThemePart::Part::kBorder, matrix);
 }
 
-void CFWL_PictureBox::OnDrawWidget(CXFA_Graphics* pGraphics,
+void CFWL_PictureBox::OnDrawWidget(CFGAS_GEGraphics* pGraphics,
                                    const CFX_Matrix& matrix) {
   DrawWidget(pGraphics, matrix);
 }

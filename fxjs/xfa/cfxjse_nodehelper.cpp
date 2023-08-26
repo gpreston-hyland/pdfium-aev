@@ -1,12 +1,10 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #include "fxjs/xfa/cfxjse_nodehelper.h"
-
-#include <utility>
 
 #include "core/fxcrt/fx_extension.h"
 #include "fxjs/xfa/cfxjse_engine.h"
@@ -15,7 +13,6 @@
 #include "xfa/fxfa/parser/cxfa_localemgr.h"
 #include "xfa/fxfa/parser/cxfa_node.h"
 #include "xfa/fxfa/parser/xfa_basic_data.h"
-#include "xfa/fxfa/parser/xfa_resolvenode_rs.h"
 #include "xfa/fxfa/parser/xfa_utils.h"
 
 CFXJSE_NodeHelper::CFXJSE_NodeHelper() = default;
@@ -27,7 +24,7 @@ bool CFXJSE_NodeHelper::CreateNodeForCondition(const WideString& wsCondition) {
   WideString wsIndex(L"0");
   bool bAll = false;
   if (szLen == 0) {
-    m_iCreateFlag = XFA_ResolveNode_RSType_CreateNodeOne;
+    m_iCreateFlag = CFXJSE_Engine::ResolveResult::Type::kCreateNodeOne;
     return false;
   }
   if (wsCondition[0] != '[')
@@ -45,9 +42,9 @@ bool CFXJSE_NodeHelper::CreateNodeForCondition(const WideString& wsCondition) {
   }
   if (bAll) {
     wsIndex = L"1";
-    m_iCreateFlag = XFA_ResolveNode_RSType_CreateNodeAll;
+    m_iCreateFlag = CFXJSE_Engine::ResolveResult::Type::kCreateNodeAll;
   } else {
-    m_iCreateFlag = XFA_ResolveNode_RSType_CreateNodeOne;
+    m_iCreateFlag = CFXJSE_Engine::ResolveResult::Type::kCreateNodeOne;
     wsIndex = wsCondition.Substr(i, szLen - 1 - i);
   }
   int32_t iCount = wsIndex.GetInteger();
@@ -106,8 +103,8 @@ bool CFXJSE_NodeHelper::CreateNode(const WideString& wsName,
     for (size_t i = 0; i < m_iCreateCount; ++i) {
       CXFA_Node* pNewNode = m_pCreateParent->CreateSamePacketNode(eClassType);
       if (pNewNode) {
-        pNewNode->JSObject()->SetAttribute(XFA_Attribute::Name, wsNameView,
-                                           false);
+        pNewNode->JSObject()->SetAttributeByEnum(XFA_Attribute::Name,
+                                                 WideString(wsNameView), false);
         pNewNode->CreateXMLMappingNode();
         m_pCreateParent->InsertChildAndNotify(pNewNode, nullptr);
         if (i == m_iCreateCount - 1) {

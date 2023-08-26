@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_parser.h"
-#include "third_party/base/stl_util.h"
+#include "third_party/base/containers/contains.h"
+#include "third_party/base/notreached.h"
 
 // static
 std::unique_ptr<CPDF_CrossRefTable> CPDF_CrossRefTable::MergeUp(
@@ -26,13 +27,16 @@ std::unique_ptr<CPDF_CrossRefTable> CPDF_CrossRefTable::MergeUp(
 
 CPDF_CrossRefTable::CPDF_CrossRefTable() = default;
 
-CPDF_CrossRefTable::CPDF_CrossRefTable(RetainPtr<CPDF_Dictionary> trailer)
-    : trailer_(std::move(trailer)) {}
+CPDF_CrossRefTable::CPDF_CrossRefTable(RetainPtr<CPDF_Dictionary> trailer,
+                                       uint32_t trailer_object_number)
+    : trailer_(std::move(trailer)),
+      trailer_object_number_(trailer_object_number) {}
 
 CPDF_CrossRefTable::~CPDF_CrossRefTable() = default;
 
 void CPDF_CrossRefTable::AddCompressed(uint32_t obj_num,
-                                       uint32_t archive_obj_num) {
+                                       uint32_t archive_obj_num,
+                                       uint32_t archive_obj_index) {
   if (obj_num >= CPDF_Parser::kMaxObjectNumber ||
       archive_obj_num >= CPDF_Parser::kMaxObjectNumber) {
     NOTREACHED();
@@ -47,7 +51,8 @@ void CPDF_CrossRefTable::AddCompressed(uint32_t obj_num,
     return;
 
   info.type = ObjectType::kCompressed;
-  info.archive_obj_num = archive_obj_num;
+  info.archive.obj_num = archive_obj_num;
+  info.archive.obj_index = archive_obj_index;
   info.gennum = 0;
 
   objects_info_[archive_obj_num].type = ObjectType::kObjStream;
@@ -87,8 +92,10 @@ void CPDF_CrossRefTable::SetFree(uint32_t obj_num) {
   info.pos = 0;
 }
 
-void CPDF_CrossRefTable::SetTrailer(RetainPtr<CPDF_Dictionary> trailer) {
+void CPDF_CrossRefTable::SetTrailer(RetainPtr<CPDF_Dictionary> trailer,
+                                    uint32_t trailer_object_number) {
   trailer_ = std::move(trailer);
+  trailer_object_number_ = trailer_object_number;
 }
 
 const CPDF_CrossRefTable::ObjectInfo* CPDF_CrossRefTable::GetObjectInfo(
@@ -103,20 +110,30 @@ void CPDF_CrossRefTable::Update(
   UpdateTrailer(std::move(new_cross_ref->trailer_));
 }
 
-void CPDF_CrossRefTable::ShrinkObjectMap(uint32_t objnum) {
-  if (objnum == 0) {
+void CPDF_CrossRefTable::SetObjectMapSize(uint32_t size) {
+  if (size == 0) {
     objects_info_.clear();
     return;
   }
 
-  objects_info_.erase(objects_info_.lower_bound(objnum), objects_info_.end());
+  objects_info_.erase(objects_info_.lower_bound(size), objects_info_.end());
 
-  if (!pdfium::Contains(objects_info_, objnum - 1))
-    objects_info_[objnum - 1].pos = 0;
+  if (!pdfium::Contains(objects_info_, size - 1)) {
+    objects_info_[size - 1].pos = 0;
+  }
 }
 
 void CPDF_CrossRefTable::UpdateInfo(
-    std::map<uint32_t, ObjectInfo>&& new_objects_info) {
+    std::map<uint32_t, ObjectInfo> new_objects_info) {
+  if (new_objects_info.empty()) {
+    return;
+  }
+
+  if (objects_info_.empty()) {
+    objects_info_ = std::move(new_objects_info);
+    return;
+  }
+
   auto cur_it = objects_info_.begin();
   auto new_it = new_objects_info.begin();
   while (cur_it != objects_info_.end() && new_it != new_objects_info.end()) {
@@ -153,5 +170,5 @@ void CPDF_CrossRefTable::UpdateTrailer(RetainPtr<CPDF_Dictionary> new_trailer) {
   new_trailer->SetFor("Prev", trailer_->RemoveFor("Prev"));
 
   for (const auto& key : new_trailer->GetKeys())
-    trailer_->SetFor(key, new_trailer->RemoveFor(key));
+    trailer_->SetFor(key, new_trailer->RemoveFor(key.AsStringView()));
 }

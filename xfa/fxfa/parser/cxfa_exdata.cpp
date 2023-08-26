@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 
 #include "xfa/fxfa/parser/cxfa_exdata.h"
 
-#include <memory>
-
 #include "fxjs/xfa/cjx_object.h"
+#include "xfa/fxfa/parser/cxfa_document.h"
 
 namespace {
 
@@ -27,18 +26,27 @@ const CXFA_Node::AttributeData kExDataAttributeData[] = {
 
 }  // namespace
 
+// static
+CXFA_ExData* CXFA_ExData::FromNode(CXFA_Node* pNode) {
+  return pNode && pNode->GetElementType() == XFA_Element::ExData
+             ? static_cast<CXFA_ExData*>(pNode)
+             : nullptr;
+}
+
 CXFA_ExData::CXFA_ExData(CXFA_Document* doc, XFA_PacketType packet)
     : CXFA_Node(doc,
                 packet,
-                (XFA_XDPPACKET_Template | XFA_XDPPACKET_Form),
+                {XFA_XDPPACKET::kTemplate, XFA_XDPPACKET::kForm},
                 XFA_ObjectType::ContentNode,
                 XFA_Element::ExData,
                 {},
                 kExDataAttributeData,
-                std::make_unique<CJX_Object>(this)) {}
+                cppgc::MakeGarbageCollected<CJX_Object>(
+                    doc->GetHeap()->GetAllocationHandle(),
+                    this)) {}
 
 CXFA_ExData::~CXFA_ExData() = default;
 
 void CXFA_ExData::SetContentType(const WideString& wsContentType) {
-  JSObject()->SetCData(XFA_Attribute::ContentType, wsContentType, false, false);
+  JSObject()->SetCData(XFA_Attribute::ContentType, wsContentType);
 }

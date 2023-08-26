@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,14 @@
 
 #include "xfa/fxfa/parser/cxfa_silentprint.h"
 
-#include <memory>
-
 #include "fxjs/xfa/cjx_node.h"
+#include "xfa/fxfa/parser/cxfa_document.h"
 
 namespace {
 
 const CXFA_Node::PropertyData kSilentPrintPropertyData[] = {
-    {XFA_Element::AddSilentPrint, 1, 0},
-    {XFA_Element::PrinterName, 1, 0},
+    {XFA_Element::AddSilentPrint, 1, {}},
+    {XFA_Element::PrinterName, 1, {}},
 };
 
 const CXFA_Node::AttributeData kSilentPrintAttributeData[] = {
@@ -27,11 +26,13 @@ const CXFA_Node::AttributeData kSilentPrintAttributeData[] = {
 CXFA_SilentPrint::CXFA_SilentPrint(CXFA_Document* doc, XFA_PacketType packet)
     : CXFA_Node(doc,
                 packet,
-                XFA_XDPPACKET_Config,
+                XFA_XDPPACKET::kConfig,
                 XFA_ObjectType::Node,
                 XFA_Element::SilentPrint,
                 kSilentPrintPropertyData,
                 kSilentPrintAttributeData,
-                std::make_unique<CJX_Node>(this)) {}
+                cppgc::MakeGarbageCollected<CJX_Node>(
+                    doc->GetHeap()->GetAllocationHandle(),
+                    this)) {}
 
 CXFA_SilentPrint::~CXFA_SilentPrint() = default;

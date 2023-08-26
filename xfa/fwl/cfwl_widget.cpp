@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,8 @@
 #include <utility>
 #include <vector>
 
-#include "third_party/base/stl_util.h"
+#include "third_party/base/check.h"
+#include "v8/include/cppgc/visitor.h"
 #include "xfa/fde/cfde_textout.h"
 #include "xfa/fwl/cfwl_app.h"
 #include "xfa/fwl/cfwl_combobox.h"
@@ -28,24 +29,38 @@
 #include "xfa/fwl/cfwl_widgetmgr.h"
 #include "xfa/fwl/ifwl_themeprovider.h"
 
-#define FWL_WGT_CalcHeight 2048
-#define FWL_WGT_CalcWidth 2048
-#define FWL_WGT_CalcMultiLineDefWidth 120.0f
+namespace {
 
-CFWL_Widget::CFWL_Widget(const CFWL_App* app,
+constexpr float kCalcHeight = 2048.0f;
+constexpr float kCalcWidth = 2048.0f;
+constexpr float kCalcMultiLineDefWidth = 120.0f;
+
+}  // namespace
+
+CFWL_Widget::CFWL_Widget(CFWL_App* app,
                          const Properties& properties,
                          CFWL_Widget* pOuter)
     : m_Properties(properties),
-      m_pOwnerApp(app),
+      m_pFWLApp(app),
       m_pWidgetMgr(app->GetWidgetMgr()),
       m_pOuter(pOuter) {
   m_pWidgetMgr->InsertWidget(m_pOuter, this);
 }
 
-CFWL_Widget::~CFWL_Widget() {
+CFWL_Widget::~CFWL_Widget() = default;
+
+void CFWL_Widget::PreFinalize() {
   CHECK(!IsLocked());  // Prefer hard stop to UaF.
   NotifyDriver();
   m_pWidgetMgr->RemoveWidget(this);
+}
+
+void CFWL_Widget::Trace(cppgc::Visitor* visitor) const {
+  visitor->Trace(m_pAdapterIface);
+  visitor->Trace(m_pFWLApp);
+  visitor->Trace(m_pWidgetMgr);
+  visitor->Trace(m_pDelegate);
+  visitor->Trace(m_pOuter);
 }
 
 bool CFWL_Widget::IsForm() const {
@@ -82,10 +97,10 @@ void CFWL_Widget::ModifyStyles(uint32_t dwStylesAdded,
   m_Properties.m_dwStyles |= dwStylesAdded;
 }
 
-void CFWL_Widget::ModifyStylesEx(uint32_t dwStylesExAdded,
-                                 uint32_t dwStylesExRemoved) {
-  m_Properties.m_dwStyleExes &= ~dwStylesExRemoved;
-  m_Properties.m_dwStyleExes |= dwStylesExAdded;
+void CFWL_Widget::ModifyStyleExts(uint32_t dwStyleExtsAdded,
+                                  uint32_t dwStyleExtsRemoved) {
+  m_Properties.m_dwStyleExts &= ~dwStyleExtsRemoved;
+  m_Properties.m_dwStyleExts |= dwStyleExtsAdded;
 }
 
 static void NotifyHideChildWidget(CFWL_WidgetMgr* widgetMgr,
@@ -104,10 +119,10 @@ void CFWL_Widget::SetStates(uint32_t dwStates) {
   if (IsVisible())
     return;
 
-  CFWL_NoteDriver* noteDriver = GetOwnerApp()->GetNoteDriver();
+  CFWL_NoteDriver* noteDriver = GetFWLApp()->GetNoteDriver();
   noteDriver->NotifyTargetHide(this);
 
-  CFWL_WidgetMgr* widgetMgr = GetOwnerApp()->GetWidgetMgr();
+  CFWL_WidgetMgr* widgetMgr = GetFWLApp()->GetWidgetMgr();
   CFWL_Widget* child = widgetMgr->GetFirstChildWidget(this);
   while (child) {
     noteDriver->NotifyTargetHide(child);
@@ -158,32 +173,32 @@ CFX_Matrix CFWL_Widget::GetMatrix() const {
 }
 
 IFWL_ThemeProvider* CFWL_Widget::GetThemeProvider() const {
-  return m_pOwnerApp->GetAdapterNative()->GetThemeProvider();
+  return GetFWLApp()->GetThemeProvider();
 }
 
 bool CFWL_Widget::IsEnabled() const {
-  return (m_Properties.m_dwStates & FWL_WGTSTATE_Disabled) == 0;
+  return (m_Properties.m_dwStates & FWL_STATE_WGT_Disabled) == 0;
 }
 
 bool CFWL_Widget::HasBorder() const {
-  return !!(m_Properties.m_dwStyles & FWL_WGTSTYLE_Border);
+  return !!(m_Properties.m_dwStyles & FWL_STYLE_WGT_Border);
 }
 
 bool CFWL_Widget::IsVisible() const {
-  return !(m_Properties.m_dwStates & FWL_WGTSTATE_Invisible);
+  return !(m_Properties.m_dwStates & FWL_STATE_WGT_Invisible);
 }
 
 bool CFWL_Widget::IsOverLapper() const {
-  return (m_Properties.m_dwStyles & FWL_WGTSTYLE_WindowTypeMask) ==
-         FWL_WGTSTYLE_OverLapper;
+  return (m_Properties.m_dwStyles & FWL_STYLE_WGT_WindowTypeMask) ==
+         FWL_STYLE_WGT_OverLapper;
 }
 
 bool CFWL_Widget::IsPopup() const {
-  return !!(m_Properties.m_dwStyles & FWL_WGTSTYLE_Popup);
+  return !!(m_Properties.m_dwStyles & FWL_STYLE_WGT_Popup);
 }
 
 bool CFWL_Widget::IsChild() const {
-  return !!(m_Properties.m_dwStyles & FWL_WGTSTYLE_Child);
+  return !!(m_Properties.m_dwStyles & FWL_STYLE_WGT_Child);
 }
 
 CFWL_Widget* CFWL_Widget::GetOutmost() const {
@@ -212,10 +227,8 @@ CFX_RectF CFWL_Widget::GetRelativeRect() const {
   return CFX_RectF(0, 0, m_WidgetRect.width, m_WidgetRect.height);
 }
 
-CFX_SizeF CFWL_Widget::CalcTextSize(const WideString& wsText,
-                                    bool bMultiLine) {
-  CFWL_ThemeText calPart;
-  calPart.m_pWidget = this;
+CFX_SizeF CFWL_Widget::CalcTextSize(const WideString& wsText, bool bMultiLine) {
+  CFWL_ThemeText calPart(CFWL_ThemePart::Part::kNone, this, nullptr);
   calPart.m_wsText = wsText;
   if (bMultiLine)
     calPart.m_dwTTOStyles.line_wrap_ = true;
@@ -223,8 +236,8 @@ CFX_SizeF CFWL_Widget::CalcTextSize(const WideString& wsText,
     calPart.m_dwTTOStyles.single_line_ = true;
 
   calPart.m_iTTOAlign = FDE_TextAlignment::kTopLeft;
-  float fWidth = bMultiLine ? FWL_WGT_CalcMultiLineDefWidth : FWL_WGT_CalcWidth;
-  CFX_RectF rect(0, 0, fWidth, FWL_WGT_CalcHeight);
+  float fWidth = bMultiLine ? kCalcMultiLineDefWidth : kCalcWidth;
+  CFX_RectF rect(0, 0, fWidth, kCalcHeight);
   GetThemeProvider()->CalcTextRect(calPart, &rect);
   return CFX_SizeF(rect.width, rect.height);
 }
@@ -233,8 +246,7 @@ void CFWL_Widget::CalcTextRect(const WideString& wsText,
                                const FDE_TextStyle& dwTTOStyles,
                                FDE_TextAlignment iTTOAlign,
                                CFX_RectF* pRect) {
-  CFWL_ThemeText calPart;
-  calPart.m_pWidget = this;
+  CFWL_ThemeText calPart(CFWL_ThemePart::Part::kNone, this, nullptr);
   calPart.m_wsText = wsText;
   calPart.m_dwTTOStyles = dwTTOStyles;
   calPart.m_iTTOAlign = iTTOAlign;
@@ -242,17 +254,12 @@ void CFWL_Widget::CalcTextRect(const WideString& wsText,
 }
 
 void CFWL_Widget::SetGrab(bool bSet) {
-  CFWL_NoteDriver* pDriver = GetOwnerApp()->GetNoteDriver();
+  CFWL_NoteDriver* pDriver = GetFWLApp()->GetNoteDriver();
   pDriver->SetGrab(bSet ? this : nullptr);
 }
 
-void CFWL_Widget::RegisterEventTarget(CFWL_Widget* pEventSource) {
-  CFWL_NoteDriver* pNoteDriver = GetOwnerApp()->GetNoteDriver();
-  pNoteDriver->RegisterEventTarget(this, pEventSource);
-}
-
 void CFWL_Widget::UnregisterEventTarget() {
-  CFWL_NoteDriver* pNoteDriver = GetOwnerApp()->GetNoteDriver();
+  CFWL_NoteDriver* pNoteDriver = GetFWLApp()->GetNoteDriver();
   pNoteDriver->UnregisterEventTarget(this);
 }
 
@@ -261,7 +268,7 @@ void CFWL_Widget::DispatchEvent(CFWL_Event* pEvent) {
     m_pOuter->GetDelegate()->OnProcessEvent(pEvent);
     return;
   }
-  CFWL_NoteDriver* pNoteDriver = GetOwnerApp()->GetNoteDriver();
+  CFWL_NoteDriver* pNoteDriver = GetFWLApp()->GetNoteDriver();
   pNoteDriver->SendEvent(pEvent);
 }
 
@@ -269,33 +276,26 @@ void CFWL_Widget::RepaintRect(const CFX_RectF& pRect) {
   m_pWidgetMgr->RepaintWidget(this, pRect);
 }
 
-void CFWL_Widget::DrawBackground(CXFA_Graphics* pGraphics,
-                                 CFWL_Part iPartBk,
-                                 const CFX_Matrix* pMatrix) {
-  CFWL_ThemeBackground param;
-  param.m_pWidget = this;
-  param.m_iPart = iPartBk;
-  param.m_pGraphics = pGraphics;
-  if (pMatrix)
-    param.m_matrix = *pMatrix;
+void CFWL_Widget::DrawBackground(CFGAS_GEGraphics* pGraphics,
+                                 CFWL_ThemePart::Part iPartBk,
+                                 const CFX_Matrix& mtMatrix) {
+  CFWL_ThemeBackground param(iPartBk, this, pGraphics);
+  param.m_matrix = mtMatrix;
   param.m_PartRect = GetRelativeRect();
   GetThemeProvider()->DrawBackground(param);
 }
 
-void CFWL_Widget::DrawBorder(CXFA_Graphics* pGraphics,
-                             CFWL_Part iPartBorder,
+void CFWL_Widget::DrawBorder(CFGAS_GEGraphics* pGraphics,
+                             CFWL_ThemePart::Part iPartBorder,
                              const CFX_Matrix& matrix) {
-  CFWL_ThemeBackground param;
-  param.m_pWidget = this;
-  param.m_iPart = iPartBorder;
-  param.m_pGraphics = pGraphics;
+  CFWL_ThemeBackground param(iPartBorder, this, pGraphics);
   param.m_matrix = matrix;
   param.m_PartRect = GetRelativeRect();
   GetThemeProvider()->DrawBackground(param);
 }
 
 void CFWL_Widget::NotifyDriver() {
-  CFWL_NoteDriver* pDriver = GetOwnerApp()->GetNoteDriver();
+  CFWL_NoteDriver* pDriver = GetFWLApp()->GetNoteDriver();
   pDriver->NotifyTargetDestroy(this);
 }
 
@@ -304,7 +304,7 @@ CFX_SizeF CFWL_Widget::GetOffsetFromParent(CFWL_Widget* pParent) {
     return CFX_SizeF();
 
   CFX_SizeF szRet(m_WidgetRect.left, m_WidgetRect.top);
-  CFWL_WidgetMgr* pWidgetMgr = GetOwnerApp()->GetWidgetMgr();
+  CFWL_WidgetMgr* pWidgetMgr = GetFWLApp()->GetWidgetMgr();
   CFWL_Widget* pDstWidget = GetParent();
   while (pDstWidget && pDstWidget != pParent) {
     CFX_RectF rtDst = pDstWidget->GetWidgetRect();
@@ -332,8 +332,7 @@ void CFWL_Widget::OnProcessMessage(CFWL_Message* pMessage) {
   switch (pMessage->GetType()) {
     case CFWL_Message::Type::kMouse: {
       CFWL_MessageMouse* pMsgMouse = static_cast<CFWL_MessageMouse*>(pMessage);
-      CFWL_EventMouse evt(pWidget, pWidget);
-      evt.m_dwCmd = pMsgMouse->m_dwCmd;
+      CFWL_EventMouse evt(pWidget, pWidget, pMsgMouse->m_dwCmd);
       pWidget->DispatchEvent(&evt);
       break;
     }
@@ -343,15 +342,6 @@ void CFWL_Widget::OnProcessMessage(CFWL_Message* pMessage) {
 }
 
 void CFWL_Widget::OnProcessEvent(CFWL_Event* pEvent) {}
-
-void CFWL_Widget::OnDrawWidget(CXFA_Graphics* pGraphics,
-                               const CFX_Matrix& matrix) {}
-
-CFWL_Widget::Properties::Properties() = default;
-
-CFWL_Widget::Properties::Properties(const Properties& that) = default;
-
-CFWL_Widget::Properties::~Properties() = default;
 
 CFWL_Widget::ScopedUpdateLock::ScopedUpdateLock(CFWL_Widget* widget)
     : widget_(widget) {

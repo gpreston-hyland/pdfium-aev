@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,14 @@
 #define XFA_FXFA_PARSER_CXFA_NODEITERATORTEMPLATE_H_
 
 #include "core/fxcrt/unowned_ptr.h"
+#include "v8/include/cppgc/macros.h"
 
 template <class NodeType,
           class TraverseStrategy,
           typename HolderType = UnownedPtr<NodeType>>
 class CXFA_NodeIteratorTemplate {
+  CPPGC_STACK_ALLOCATED();  // Allows Raw/Unowned |HolderType|.
+
  public:
   explicit CXFA_NodeIteratorTemplate(NodeType* pRoot)
       : m_pRoot(pRoot), m_pCurrent(pRoot) {}

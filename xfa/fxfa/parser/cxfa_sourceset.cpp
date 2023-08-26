@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 
 #include "xfa/fxfa/parser/cxfa_sourceset.h"
 
-#include <memory>
-
 #include "fxjs/xfa/cjx_model.h"
+#include "xfa/fxfa/parser/cxfa_document.h"
 
 namespace {
 
@@ -24,11 +23,13 @@ const CXFA_Node::AttributeData kSourceSetAttributeData[] = {
 CXFA_SourceSet::CXFA_SourceSet(CXFA_Document* doc, XFA_PacketType packet)
     : CXFA_Node(doc,
                 packet,
-                XFA_XDPPACKET_SourceSet,
+                XFA_XDPPACKET::kSourceSet,
                 XFA_ObjectType::ModelNode,
                 XFA_Element::SourceSet,
                 {},
                 kSourceSetAttributeData,
-                std::make_unique<CJX_Model>(this)) {}
+                cppgc::MakeGarbageCollected<CJX_Model>(
+                    doc->GetHeap()->GetAllocationHandle(),
+                    this)) {}
 
 CXFA_SourceSet::~CXFA_SourceSet() = default;

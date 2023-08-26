@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,7 @@
 
 #include "xfa/fxfa/cxfa_ffpasswordedit.h"
 
-#include <memory>
-#include <utility>
-
+#include "third_party/base/check.h"
 #include "xfa/fwl/cfwl_edit.h"
 #include "xfa/fwl/cfwl_notedriver.h"
 #include "xfa/fxfa/cxfa_ffdoc.h"
@@ -21,26 +19,28 @@ CXFA_FFPasswordEdit::CXFA_FFPasswordEdit(CXFA_Node* pNode,
 
 CXFA_FFPasswordEdit::~CXFA_FFPasswordEdit() = default;
 
+void CXFA_FFPasswordEdit::Trace(cppgc::Visitor* visitor) const {
+  CXFA_FFTextEdit::Trace(visitor);
+  visitor->Trace(password_node_);
+}
+
 bool CXFA_FFPasswordEdit::LoadWidget() {
-  ASSERT(!IsLoaded());
+  DCHECK(!IsLoaded());
 
-  // Prevents destruction of the CXFA_ContentLayoutItem that owns |this|.
-  RetainPtr<CXFA_ContentLayoutItem> retain_layout(m_pLayoutItem.Get());
-
-  auto pNewEdit = std::make_unique<CFWL_Edit>(
-      GetFWLApp(), CFWL_Widget::Properties(), nullptr);
-  CFWL_Edit* pWidget = pNewEdit.get();
-  SetNormalWidget(std::move(pNewEdit));
+  CFWL_Edit* pWidget = cppgc::MakeGarbageCollected<CFWL_Edit>(
+      GetFWLApp()->GetHeap()->GetAllocationHandle(), GetFWLApp(),
+      CFWL_Widget::Properties(), nullptr);
+  SetNormalWidget(pWidget);
   pWidget->SetAdapterIface(this);
 
-  CFWL_NoteDriver* pNoteDriver = pWidget->GetOwnerApp()->GetNoteDriver();
+  CFWL_NoteDriver* pNoteDriver = pWidget->GetFWLApp()->GetNoteDriver();
   pNoteDriver->RegisterEventTarget(pWidget, pWidget);
   m_pOldDelegate = pWidget->GetDelegate();
   pWidget->SetDelegate(this);
 
   {
     CFWL_Widget::ScopedUpdateLock update_lock(pWidget);
-    pWidget->SetText(m_pNode->GetValue(XFA_VALUEPICTURE_Display));
+    pWidget->SetText(m_pNode->GetValue(XFA_ValuePicture::kDisplay));
     UpdateWidgetProperty();
   }
 
@@ -66,5 +66,5 @@ void CXFA_FFPasswordEdit::UpdateWidgetProperty() {
     dwExtendedStyle |= FWL_STYLEEXT_EDT_ReadOnly;
 
   dwExtendedStyle |= GetAlignment();
-  GetNormalWidget()->ModifyStylesEx(dwExtendedStyle, 0xFFFFFFFF);
+  GetNormalWidget()->ModifyStyleExts(dwExtendedStyle, 0xFFFFFFFF);
 }

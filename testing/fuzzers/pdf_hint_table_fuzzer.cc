@@ -1,4 +1,4 @@
-// Copyright 2016 The PDFium Authors. All rights reserved.
+// Copyright 2016 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "core/fpdfapi/parser/cpdf_linearized_header.h"
 #include "core/fpdfapi/parser/cpdf_number.h"
 #include "core/fxcrt/cfx_bitstream.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 int32_t GetData(const int32_t** data32, const uint8_t** data, size_t* size) {
   const int32_t* ret = *data32;
@@ -27,7 +27,7 @@ class HintTableForFuzzing final : public CPDF_HintTables {
                       int shared_hint_table_offset)
       : CPDF_HintTables(nullptr, pLinearized),
         shared_hint_table_offset_(shared_hint_table_offset) {}
-  ~HintTableForFuzzing() {}
+  ~HintTableForFuzzing() override = default;
 
   void Fuzz(const uint8_t* data, size_t size) {
     if (shared_hint_table_offset_ <= 0)

@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 
 #include "xfa/fxfa/parser/cxfa_form.h"
 
-#include <memory>
-
 #include "fxjs/xfa/cjx_form.h"
+#include "xfa/fxfa/parser/cxfa_document.h"
 
 namespace {
 
@@ -21,11 +20,13 @@ const CXFA_Node::AttributeData kFormAttributeData[] = {
 CXFA_Form::CXFA_Form(CXFA_Document* doc, XFA_PacketType packet)
     : CXFA_Node(doc,
                 packet,
-                XFA_XDPPACKET_Form,
+                XFA_XDPPACKET::kForm,
                 XFA_ObjectType::ModelNode,
                 XFA_Element::Form,
                 {},
                 kFormAttributeData,
-                std::make_unique<CJX_Form>(this)) {}
+                cppgc::MakeGarbageCollected<CJX_Form>(
+                    doc->GetHeap()->GetAllocationHandle(),
+                    this)) {}
 
 CXFA_Form::~CXFA_Form() = default;

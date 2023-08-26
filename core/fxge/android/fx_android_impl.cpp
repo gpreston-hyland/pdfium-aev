@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/android/cfpf_skiadevicemodule.h"
 #include "core/fxge/android/cfx_androidfontinfo.h"
 #include "core/fxge/cfx_fontmgr.h"
@@ -20,19 +21,20 @@ class CAndroidPlatform : public CFX_GEModule::PlatformIface {
       m_pDeviceModule->Destroy();
   }
 
-  void Init() override {
-    m_pDeviceModule = CFPF_GetSkiaDeviceModule();
+  void Init() override { m_pDeviceModule = CFPF_GetSkiaDeviceModule(); }
+
+  std::unique_ptr<SystemFontInfoIface> CreateDefaultSystemFontInfo() override {
     CFPF_SkiaFontMgr* pFontMgr = m_pDeviceModule->GetFontMgr();
     if (!pFontMgr)
-      return;
+      return nullptr;
 
     auto pFontInfo = std::make_unique<CFX_AndroidFontInfo>();
     pFontInfo->Init(pFontMgr);
-    CFX_GEModule::Get()->GetFontMgr()->SetSystemFontInfo(std::move(pFontInfo));
+    return pFontInfo;
   }
 
  private:
-  CFPF_SkiaDeviceModule* m_pDeviceModule = nullptr;
+  UnownedPtr<CFPF_SkiaDeviceModule> m_pDeviceModule;
 };
 
 // static

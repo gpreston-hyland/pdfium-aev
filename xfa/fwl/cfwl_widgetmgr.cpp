@@ -1,4 +1,4 @@
-// Copyright 2014 PDFium Authors. All rights reserved.
+// Copyright 2014 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,19 +6,28 @@
 
 #include "xfa/fwl/cfwl_widgetmgr.h"
 
-#include <utility>
-
 #include "build/build_config.h"
+#include "fxjs/gc/container_trace.h"
+#include "third_party/base/check.h"
 #include "xfa/fwl/cfwl_app.h"
 #include "xfa/fwl/cfwl_message.h"
 #include "xfa/fwl/cfwl_notedriver.h"
+#include "xfa/fwl/cfwl_pushbutton.h"
 
-CFWL_WidgetMgr::CFWL_WidgetMgr(AdapterIface* pAdapterNative)
-    : m_pAdapter(pAdapterNative) {
-  m_mapWidgetItem[nullptr] = std::make_unique<Item>();
+CFWL_WidgetMgr::CFWL_WidgetMgr(AdapterIface* pAdapter, CFWL_App* pApp)
+    : m_pAdapter(pAdapter), m_pApp(pApp) {
+  DCHECK(m_pAdapter);
+  m_mapWidgetItem[nullptr] = cppgc::MakeGarbageCollected<Item>(
+      pApp->GetHeap()->GetAllocationHandle(), nullptr);
 }
 
 CFWL_WidgetMgr::~CFWL_WidgetMgr() = default;
+
+void CFWL_WidgetMgr::Trace(cppgc::Visitor* visitor) const {
+  visitor->Trace(m_pApp);
+  visitor->Trace(m_pAdapter);
+  ContainerTrace(visitor, m_mapWidgetItem);
+}
 
 CFWL_Widget* CFWL_WidgetMgr::GetParentWidget(const CFWL_Widget* pWidget) const {
   Item* pItem = GetWidgetMgrItem(pWidget);
@@ -93,7 +102,7 @@ void CFWL_WidgetMgr::InsertWidget(CFWL_Widget* pParent, CFWL_Widget* pChild) {
 }
 
 void CFWL_WidgetMgr::RemoveWidget(CFWL_Widget* pWidget) {
-  ASSERT(pWidget);
+  DCHECK(pWidget);
   Item* pItem = GetWidgetMgrItem(pWidget);
   if (!pItem)
     return;
@@ -126,15 +135,15 @@ CFWL_Widget* CFWL_WidgetMgr::GetWidgetAtPoint(CFWL_Widget* parent,
 }
 
 CFWL_Widget* CFWL_WidgetMgr::GetDefaultButton(CFWL_Widget* pParent) const {
-  if ((pParent->GetClassID() == FWL_Type::PushButton) &&
-      (pParent->GetStates() & (1 << (FWL_WGTSTATE_MAX + 2)))) {
+  if (pParent->GetClassID() == FWL_Type::PushButton &&
+      (pParent->GetStates() & FWL_STATE_PSB_Default)) {
     return pParent;
   }
 
   CFWL_Widget* child = GetFirstChildWidget(pParent);
   while (child) {
-    if ((child->GetClassID() == FWL_Type::PushButton) &&
-        (child->GetStates() & (1 << (FWL_WGTSTATE_MAX + 2)))) {
+    if (child->GetClassID() == FWL_Type::PushButton &&
+        (child->GetStates() & FWL_STATE_PSB_Default)) {
       return child;
     }
     if (CFWL_Widget* find = GetDefaultButton(child))
@@ -152,14 +161,14 @@ CFWL_WidgetMgr::Item* CFWL_WidgetMgr::GetWidgetMgrRootItem() const {
 CFWL_WidgetMgr::Item* CFWL_WidgetMgr::GetWidgetMgrItem(
     const CFWL_Widget* pWidget) const {
   auto it = m_mapWidgetItem.find(pWidget);
-  return it != m_mapWidgetItem.end() ? it->second.get() : nullptr;
+  return it != m_mapWidgetItem.end() ? it->second : nullptr;
 }
 
 CFWL_WidgetMgr::Item* CFWL_WidgetMgr::CreateWidgetMgrItem(
     CFWL_Widget* pWidget) {
-  auto pOwnedItem = std::make_unique<Item>(pWidget);
-  auto* pItem = pOwnedItem.get();
-  m_mapWidgetItem[pWidget] = std::move(pOwnedItem);
+  auto* pItem = cppgc::MakeGarbageCollected<Item>(
+      m_pApp->GetHeap()->GetAllocationHandle(), pWidget);
+  m_mapWidgetItem[pWidget] = pItem;
   return pItem;
 }
 
@@ -172,18 +181,17 @@ void CFWL_WidgetMgr::GetAdapterPopupPos(CFWL_Widget* pWidget,
                           pPopupRect);
 }
 
-void CFWL_WidgetMgr::OnProcessMessageToForm(
-    std::unique_ptr<CFWL_Message> pMessage) {
+void CFWL_WidgetMgr::OnProcessMessageToForm(CFWL_Message* pMessage) {
   CFWL_Widget* pDstWidget = pMessage->GetDstTarget();
   if (!pDstWidget)
     return;
 
-  CFWL_NoteDriver* pNoteDriver = pDstWidget->GetOwnerApp()->GetNoteDriver();
-  pNoteDriver->ProcessMessage(std::move(pMessage));
+  CFWL_NoteDriver* pNoteDriver = pDstWidget->GetFWLApp()->GetNoteDriver();
+  pNoteDriver->ProcessMessage(pMessage);
 }
 
 void CFWL_WidgetMgr::OnDrawWidget(CFWL_Widget* pWidget,
-                                  CXFA_Graphics* pGraphics,
+                                  CFGAS_GEGraphics* pGraphics,
                                   const CFX_Matrix& matrix) {
   if (!pWidget || !pGraphics)
     return;
@@ -192,13 +200,13 @@ void CFWL_WidgetMgr::OnDrawWidget(CFWL_Widget* pWidget,
 
   CFX_RectF clipBounds = pGraphics->GetClipRect();
   if (!clipBounds.IsEmpty())
-    DrawChildren(pWidget, clipBounds, pGraphics, &matrix);
+    DrawChildren(pWidget, clipBounds, pGraphics, matrix);
 }
 
 void CFWL_WidgetMgr::DrawChildren(CFWL_Widget* parent,
                                   const CFX_RectF& rtClip,
-                                  CXFA_Graphics* pGraphics,
-                                  const CFX_Matrix* pMatrix) {
+                                  CFGAS_GEGraphics* pGraphics,
+                                  const CFX_Matrix& mtMatrix) {
   if (!parent)
     return;
 
@@ -215,20 +223,21 @@ void CFWL_WidgetMgr::DrawChildren(CFWL_Widget* parent,
 
     CFX_Matrix widgetMatrix;
     CFX_RectF clipBounds(rtWidget);
-    if (pMatrix)
-      widgetMatrix.Concat(*pMatrix);
-
+    widgetMatrix.Concat(mtMatrix);
     widgetMatrix.TranslatePrepend(rtWidget.left, rtWidget.top);
 
     if (IFWL_WidgetDelegate* pDelegate = child->GetDelegate())
       pDelegate->OnDrawWidget(pGraphics, widgetMatrix);
 
-    DrawChildren(child, clipBounds, pGraphics, &widgetMatrix);
+    DrawChildren(child, clipBounds, pGraphics, widgetMatrix);
   }
 }
-
-CFWL_WidgetMgr::Item::Item() : pWidget(nullptr) {}
 
 CFWL_WidgetMgr::Item::Item(CFWL_Widget* widget) : pWidget(widget) {}
 
 CFWL_WidgetMgr::Item::~Item() = default;
+
+void CFWL_WidgetMgr::Item::Trace(cppgc::Visitor* visitor) const {
+  GCedTreeNode<Item>::Trace(visitor);
+  visitor->Trace(pWidget);
+}

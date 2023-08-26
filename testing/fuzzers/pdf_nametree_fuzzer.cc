@@ -1,4 +1,4 @@
-// Copyright 2019 The PDFium Authors. All rights reserved.
+// Copyright 2019 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_object.h"
 #include "core/fpdfdoc/cpdf_nametree.h"
-#include "third_party/base/span.h"
+#include "third_party/base/containers/span.h"
 
 struct Params {
   bool delete_backwards;

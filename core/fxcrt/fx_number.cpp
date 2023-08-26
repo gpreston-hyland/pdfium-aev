@@ -1,4 +1,4 @@
-// Copyright 2018 PDFium Authors. All rights reserved.
+// Copyright 2018 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,14 @@
 
 #include "core/fxcrt/fx_number.h"
 
+#include <ctype.h>
+
 #include <limits>
 
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/fx_string.h"
+#include "third_party/base/numerics/safe_conversions.h"
 
 FX_Number::FX_Number()
     : m_bIsInteger(true), m_bIsSigned(false), m_UnsignedValue(0) {}
@@ -50,10 +53,11 @@ FX_Number::FX_Number(ByteStringView strc)
     cc++;
   }
 
-  for (; cc < strc.GetLength() && std::isdigit(strc[cc]); ++cc) {
+  for (; cc < strc.GetLength() && isdigit(strc[cc]); ++cc) {
     // Deliberately not using FXSYS_DecimalCharToInt() in a tight loop to avoid
-    // a duplicate std::isdigit() call.
-    unsigned_val = unsigned_val * 10 + strc[cc] - '0';
+    // a duplicate isdigit() call. Note that the order of operation is
+    // important to avoid unintentional overflows.
+    unsigned_val = unsigned_val * 10 + (strc[cc] - '0');
   }
 
   uint32_t uValue = unsigned_val.ValueOrDefault(0);
@@ -85,7 +89,11 @@ FX_Number::FX_Number(ByteStringView strc)
 }
 
 int32_t FX_Number::GetSigned() const {
-  return m_bIsInteger ? m_SignedValue : static_cast<int32_t>(m_FloatValue);
+  if (m_bIsInteger) {
+    return m_SignedValue;
+  }
+
+  return pdfium::base::saturated_cast<int32_t>(m_FloatValue);
 }
 
 float FX_Number::GetFloat() const {

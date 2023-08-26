@@ -1,4 +1,4 @@
-// Copyright 2017 PDFium Authors. All rights reserved.
+// Copyright 2017 The PDFium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,18 +6,19 @@
 
 #include "xfa/fxfa/parser/cxfa_packet.h"
 
-#include <memory>
-
 #include "fxjs/xfa/cjx_packet.h"
+#include "xfa/fxfa/parser/cxfa_document.h"
 
 CXFA_Packet::CXFA_Packet(CXFA_Document* doc, XFA_PacketType packet)
     : CXFA_Node(doc,
                 packet,
-                XFA_XDPPACKET_XDP,
+                XFA_XDPPACKET::kXdp,
                 XFA_ObjectType::NodeC,
                 XFA_Element::Packet,
                 {},
                 {},
-                std::make_unique<CJX_Packet>(this)) {}
+                cppgc::MakeGarbageCollected<CJX_Packet>(
+                    doc->GetHeap()->GetAllocationHandle(),
+                    this)) {}
 
 CXFA_Packet::~CXFA_Packet() = default;

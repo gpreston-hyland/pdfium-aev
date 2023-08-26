@@ -1,4 +1,4 @@
-# Copyright 2018 The PDFium Authors. All rights reserved.
+# Copyright 2018 The PDFium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -15,8 +15,9 @@ source_set("fxjs") {
     "ijs_runtime.cpp",
     "ijs_runtime.h",
   ]
-  configs += [ "../:pdfium_core_config" ]
+  configs += [ "../:pdfium_strict_config" ]
   deps = [ "../core/fxcrt" ]
+  public_deps = []
   visibility = [ "../*" ]
 
   if (pdf_enable_v8) {
@@ -27,6 +28,8 @@ source_set("fxjs") {
       "cfx_keyvalue.h",
       "cfx_v8.cpp",
       "cfx_v8.h",
+      "cfx_v8_array_buffer_allocator.cpp",
+      "cfx_v8_array_buffer_allocator.h",
       "cfxjs_engine.cpp",
       "cfxjs_engine.h",
       "cjs_annot.cpp",
@@ -49,8 +52,6 @@ source_set("fxjs") {
       "cjs_event.h",
       "cjs_event_context.cpp",
       "cjs_event_context.h",
-      "cjs_eventrecorder.cpp",
-      "cjs_eventrecorder.h",
       "cjs_field.cpp",
       "cjs_field.h",
       "cjs_font.cpp",
@@ -110,14 +111,13 @@ source_set("fxjs") {
       "//v8:v8_libplatform",
     ]
     configs += [ "//v8:external_startup_data" ]
-    public_deps = [ "//v8" ]
+    public_deps += [
+      "../core/fxcrt",
+      "//v8",
+    ]
 
     if (pdf_enable_xfa) {
       sources += [
-        "gc/gced_tree_node.h",
-        "gc/gced_tree_node_mixin.h",
-        "gc/heap.cpp",
-        "gc/heap.h",
         "xfa/cfxjse_class.cpp",
         "xfa/cfxjse_class.h",
         "xfa/cfxjse_context.cpp",
@@ -128,6 +128,8 @@ source_set("fxjs") {
         "xfa/cfxjse_formcalc_context.h",
         "xfa/cfxjse_isolatetracker.cpp",
         "xfa/cfxjse_isolatetracker.h",
+        "xfa/cfxjse_mapmodule.cpp",
+        "xfa/cfxjse_mapmodule.h",
         "xfa/cfxjse_nodehelper.cpp",
         "xfa/cfxjse_nodehelper.h",
         "xfa/cfxjse_resolveprocessor.cpp",
@@ -209,10 +211,30 @@ source_set("fxjs") {
         "xfa/jse_define.h",
       ]
       deps += [
-        "../xfa/fgas",
-        "../xfa/fxfa/fm2js",
-        "//v8:cppgc",
+        ":gc",
+        "../xfa/fgas/crt",
+        "../xfa/fxfa/formcalc",
       ]
+    }
+  }
+}
+
+if (pdf_enable_v8) {
+  if (pdf_enable_xfa) {
+    source_set("gc") {
+      sources = [
+        "gc/container_trace.h",
+        "gc/gced_tree_node.h",
+        "gc/gced_tree_node_mixin.h",
+        "gc/heap.cpp",
+        "gc/heap.h",
+      ]
+      configs += [ "../:pdfium_strict_config" ]
+      deps = [
+        "../core/fxcrt",
+        "//v8:v8_libplatform",
+      ]
+      public_deps = [ "//v8:cppgc" ]
     }
   }
 }
@@ -228,15 +250,25 @@ if (pdf_enable_v8) {
       "fx_date_helpers_unittest.cpp",
     ]
     configs = [ "//v8:external_startup_data" ]
-    deps = [ ":fxjs" ]
+    deps = [
+      ":fxjs",
+      "../core/fxcrt:unit_test_support",
+    ]
     pdfium_root_dir = "../"
     if (pdf_enable_xfa) {
       sources += [
+        "gc/container_trace_unittest.cpp",
         "gc/gced_tree_node_mixin_unittest.cpp",
         "gc/gced_tree_node_unittest.cpp",
         "gc/heap_unittest.cpp",
+        "gc/move_unittest.cpp",
+        "xfa/cfxjse_formcalc_context_unittest.cpp",
+        "xfa/cfxjse_mapmodule_unittest.cpp",
       ]
-      deps += [ "//v8:cppgc" ]
+      deps += [
+        ":gc",
+        "../xfa/fxfa/parser",
+      ]
     }
   }
 
@@ -258,10 +290,11 @@ if (pdf_enable_v8) {
         "xfa/cfxjse_value_embeddertest.cpp",
         "xfa/cjx_hostpseudomodel_embeddertest.cpp",
         "xfa/cjx_list_embeddertest.cpp",
+        "xfa/cjx_object_embeddertest.cpp",
       ]
       deps += [
+        ":gc",
         "../xfa/fxfa",
-        "//v8:cppgc",
       ]
     }
   }
